@@ -1,0 +1,1046 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Citibus Narbonne — Bus en temps réel</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<style>
+  :root {
+    --panel: #ffffff;
+    --accent: #6d2c74;
+    --accent-2: #9c4fa0;
+    --accent-soft: #f4e9f5;
+    --text: #201a26;
+    --muted: #766e80;
+    --border: #ece3ee;
+    --radius: 16px;
+    --shadow: 0 10px 30px -8px rgba(60, 20, 65, 0.25), 0 2px 8px rgba(60,20,65,0.08);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    height: 100%; margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+  }
+  #map { position: absolute; inset: 0; background: #eef1f4; }
+  .leaflet-control-attribution { font-size: 10px; }
+
+  /* ---------- Header ---------- */
+  header {
+    position: absolute; top: 12px; left: 12px; right: 12px; z-index: 1000;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+    background: rgba(255,255,255,0.9); backdrop-filter: blur(10px);
+    padding: 10px 16px; border-radius: 20px;
+    box-shadow: var(--shadow);
+    border: 1px solid rgba(255,255,255,0.6);
+  }
+  #logo { height: 30px; width: auto; display: block; border-radius: 6px; }
+  #logo-fallback {
+    display: none; height: 30px; width: 30px; border-radius: 8px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    align-items: center; justify-content: center; font-size: 16px;
+  }
+  header h1 {
+    font-size: 15px; margin: 0; color: var(--text); white-space: nowrap;
+    font-weight: 700; letter-spacing: -0.2px;
+  }
+  header h1 span { color: var(--accent); font-weight: 800; }
+  #status {
+    font-size: 11px; color: var(--muted); margin-left: auto; white-space: nowrap;
+    display: flex; align-items: center; gap: 5px;
+  }
+  #status .dot {
+    width: 7px; height: 7px; border-radius: 50%; background: #22c55e;
+    box-shadow: 0 0 0 3px rgba(34,197,94,0.25);
+  }
+
+  #search {
+    flex: 1 1 160px; min-width: 120px;
+    padding: 9px 14px; border: 1.5px solid var(--border); border-radius: 12px;
+    font-size: 13px; outline: none; transition: border-color 0.15s;
+    background: #faf7fb;
+  }
+  #search:focus { border-color: var(--accent-2); background: #fff; }
+
+  #locate-btn {
+    flex-shrink: 0; width: 40px; height: 40px; border-radius: 12px;
+    border: 1.5px solid var(--border); background: #faf7fb; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; font-size: 17px;
+    transition: 0.15s;
+  }
+  #locate-btn:hover { background: var(--accent-soft); border-color: var(--accent-2); }
+  #locate-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  #locate-btn.loading { animation: spin 1s linear infinite; }
+  @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+  #search-results {
+    position: absolute; top: 66px; left: 12px; right: 12px; z-index: 1000;
+    background: var(--panel); border-radius: 14px; box-shadow: var(--shadow);
+    max-height: 220px; overflow-y: auto; display: none; border: 1px solid var(--border);
+  }
+  #search-results div {
+    padding: 10px 16px; font-size: 13px; cursor: pointer; border-bottom: 1px solid var(--border);
+  }
+  #search-results div:last-child { border-bottom: none; }
+  #search-results div:hover { background: var(--accent-soft); }
+
+  /* ---------- Panneaux flottants ---------- */
+  #layers, #line-filter {
+    position: absolute; z-index: 1000;
+    background: rgba(255,255,255,0.92); backdrop-filter: blur(8px);
+    border-radius: 14px; padding: 10px 14px;
+    box-shadow: var(--shadow); font-size: 12px; color: var(--text);
+    border: 1px solid rgba(255,255,255,0.6);
+  }
+  #layers { bottom: 18px; left: 12px; }
+  #line-filter { bottom: 18px; right: 12px; display: flex; flex-direction: column; gap: 7px; }
+  #layers label { display: flex; align-items: center; gap: 7px; padding: 3px 0; white-space: nowrap; font-weight: 500; }
+  .switch-row { display: flex; align-items: center; gap: 8px; }
+  .switch { position: relative; width: 38px; height: 20px; flex-shrink: 0; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .slider {
+    position: absolute; cursor: pointer; inset: 0; background: #d7cdd9;
+    border-radius: 20px; transition: 0.2s;
+  }
+  .slider::before {
+    content: ""; position: absolute; width: 16px; height: 16px; left: 2px; top: 2px;
+    background: white; border-radius: 50%; transition: 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+  }
+  input:checked + .slider { background: var(--accent); }
+  input:checked + .slider::before { transform: translateX(18px); }
+  .switch-row span { white-space: nowrap; font-weight: 500; }
+
+  #selection-banner {
+    position: absolute; top: 66px; left: 12px; right: 12px; max-width: 380px; z-index: 1000;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: white;
+    padding: 6px 8px 6px 16px; border-radius: 14px;
+    box-shadow: var(--shadow); font-size: 13px; font-weight: 600;
+    display: none; align-items: center; gap: 10px; justify-content: space-between;
+  }
+  #selection-banner .banner-text { cursor: pointer; flex: 1; min-width: 0; }
+  #selection-banner .banner-text u { text-decoration: none; opacity: 0.85; font-weight: 500; }
+  #eye-btn {
+    flex-shrink: 0; width: 38px; height: 38px; border-radius: 50%;
+    border: none; background: rgba(255,255,255,0.22); color: #fff; cursor: pointer;
+    font-size: 17px; display: flex; align-items: center; justify-content: center;
+    transition: background 0.15s;
+  }
+  #eye-btn:hover, #eye-btn:focus-visible { background: rgba(255,255,255,0.4); }
+
+  /* ---------- Icône bus ---------- */
+  .bus-wrap { position: relative; width: 34px; height: 34px; }
+  .bus-rot { position: absolute; inset: 0; }
+  .bus-label {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 800; color: #fff; pointer-events: none;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.55), 0 0 3px rgba(0,0,0,0.35);
+  }
+
+  /* ---------- Popups Leaflet ---------- */
+  .leaflet-popup-content-wrapper { border-radius: 16px; box-shadow: var(--shadow); }
+  .leaflet-popup-content { font-size: 13px; min-width: 220px; margin: 12px 14px; }
+  .stop-popup h3, .bus-popup h3 { margin: 0 0 8px; font-size: 14.5px; }
+  .bus-popup .route-badge {
+    display: inline-flex; align-items: center; gap: 6px; color: white;
+    border-radius: 8px; padding: 3px 10px; font-weight: 800; font-size: 13px;
+  }
+  .bus-popup .headsign { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .bus-popup .meta-row {
+    display: flex; justify-content: space-between; font-size: 12px; color: var(--muted);
+    margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--border);
+  }
+  .bus-popup .section-title {
+    font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.4px; color: var(--muted);
+    margin: 10px 0 4px; font-weight: 700;
+  }
+  .passage-row {
+    display: flex; align-items: center; gap: 8px; padding: 5px 0;
+    border-bottom: 1px solid var(--border); font-size: 12.5px;
+  }
+  .passage-row:last-child { border-bottom: none; }
+  .line-badge {
+    color: white; border-radius: 6px; padding: 1px 7px; font-weight: 700; font-size: 12px;
+    flex-shrink: 0;
+  }
+  .passage-time { margin-left: auto; font-weight: 700; color: var(--text); }
+  .passage-time.live { color: var(--accent); }
+
+  .feedback-btn, .feedback-summary-btn {
+    margin-top: 10px; width: 100%; border: none; cursor: pointer;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #fff;
+    padding: 9px 12px; border-radius: 10px; font-size: 12.5px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+  }
+  .feedback-avg { margin-top: 8px; }
+  .feedback-avg-row {
+    display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 3px 0; color: var(--text);
+  }
+  .feedback-avg-row .bar {
+    flex: 1; height: 6px; border-radius: 4px; background: var(--border); overflow: hidden;
+  }
+  .feedback-avg-row .bar-fill { height: 100%; background: linear-gradient(90deg, var(--accent-2), var(--accent)); }
+  .feedback-avg-row .pct { width: 34px; text-align: right; font-weight: 700; }
+  .feedback-empty { font-size: 12px; color: var(--muted); font-style: italic; }
+
+  /* ---------- Modale questionnaire ---------- */
+  #feedback-overlay {
+    position: fixed; inset: 0; background: rgba(32, 26, 38, 0.45); z-index: 2000;
+    display: none; align-items: center; justify-content: center; padding: 16px;
+  }
+  #feedback-modal {
+    background: #fff; border-radius: 20px; padding: 22px; max-width: 380px; width: 100%;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.35); max-height: 90vh; overflow-y: auto;
+  }
+  #feedback-modal h2 { margin: 0 0 4px; font-size: 17px; }
+  #feedback-modal .modal-sub { font-size: 12.5px; color: var(--muted); margin-bottom: 16px; }
+  .question-block { margin-bottom: 14px; }
+  .question-block label.qlabel { font-size: 13px; font-weight: 600; display: block; margin-bottom: 7px; }
+  .toggle-group { display: flex; gap: 8px; }
+  .toggle-group button {
+    flex: 1; padding: 9px 0; border-radius: 10px; border: 1.5px solid var(--border);
+    background: #faf7fb; cursor: pointer; font-size: 13px; font-weight: 600; color: var(--text);
+    transition: 0.15s;
+  }
+  .toggle-group button.selected-yes { background: #22c55e; border-color: #22c55e; color: #fff; }
+  .toggle-group button.selected-no { background: #ef4444; border-color: #ef4444; color: #fff; }
+  #feedback-actions { display: flex; gap: 10px; margin-top: 18px; }
+  #feedback-actions button {
+    flex: 1; border: none; padding: 11px; border-radius: 12px; font-size: 13.5px; font-weight: 700; cursor: pointer;
+  }
+  #feedback-cancel { background: #f1eaf2; color: var(--text); }
+  #feedback-submit { background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #fff; }
+  #feedback-submit:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* ---------- Marqueur géolocalisation ---------- */
+  .user-dot {
+    width: 16px; height: 16px; border-radius: 50%; background: #3b82f6;
+    border: 3px solid #fff; box-shadow: 0 0 0 3px rgba(59,130,246,0.35), 0 2px 6px rgba(0,0,0,0.3);
+  }
+  .user-dot-pulse {
+    width: 16px; height: 16px; border-radius: 50%; background: rgba(59,130,246,0.35);
+    animation: pulse 1.6s ease-out infinite;
+  }
+  @keyframes pulse {
+    0% { transform: scale(1); opacity: 0.7; }
+    100% { transform: scale(2.6); opacity: 0; }
+  }
+
+  @media (max-width: 480px) {
+    header { padding: 8px 10px; }
+    header h1 { font-size: 13px; }
+    #status { width: 100%; margin-left: 0; order: 3; }
+    #layers, #line-filter { font-size: 11px; padding: 8px 10px; }
+    #line-filter-label { max-width: 90px; white-space: normal; line-height: 1.2; }
+    /* Cibles tactiles agrandies sur mobile (norme d'accessibilité : 44x44px mini) */
+    #locate-btn, #eye-btn { width: 44px; height: 44px; }
+    .switch { width: 42px; height: 24px; }
+    .slider::before { width: 18px; height: 18px; }
+    input:checked + .slider::before { transform: translateX(20px); }
+    #layers label, .switch-row span { font-size: 12px; padding: 5px 0; }
+    #feedback-modal { padding: 18px; }
+    .toggle-group button { padding: 12px 0; }
+  }
+
+  /* ---------- Accessibilité clavier / lecteurs d'écran ---------- */
+  a:focus-visible, button:focus-visible, input:focus-visible,
+  [tabindex]:focus-visible, .switch input:focus-visible + .slider {
+    outline: 3px solid #3b82f6; outline-offset: 2px;
+  }
+  button, input, .switch-row, #search-results div { font-family: inherit; }
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #locate-btn.loading, .user-dot-pulse { animation: none; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <img id="logo" alt="Logo Citibus"
+       src="https://files-explore-citibus-pprd.ratpdev.com/s3fs-public/inline-images/RAT%20DEV_CITIBUS_Logo%20Citibus_RVB_CITIBUS%20Mauve%20RVB.png"
+       onerror="this.style.display='none'; document.getElementById('logo-fallback').style.display='flex';" />
+  <div id="logo-fallback" aria-hidden="true">🚌</div>
+  <h1>Citibus <span>Narbonne</span></h1>
+  <input id="search" type="text" placeholder="Chercher un arrêt…" autocomplete="off" aria-label="Chercher un arrêt de bus" />
+  <button id="locate-btn" title="Me géolocaliser" aria-label="Me géolocaliser sur la carte" aria-pressed="false">📍</button>
+  <div id="status" role="status" aria-live="polite"><span class="dot" aria-hidden="true"></span>Chargement…</div>
+</header>
+<div id="search-results" role="listbox" aria-label="Résultats de recherche d'arrêts"></div>
+<div id="selection-banner" role="region" aria-label="Bus sélectionné"></div>
+
+<div id="layers">
+  <label><input type="checkbox" id="toggle-vehicles" checked /> 🚍 Bus en direct</label>
+  <label><input type="checkbox" id="toggle-stops" checked /> ● Arrêts</label>
+  <label><input type="checkbox" id="toggle-lines" checked /> — Tracés des lignes</label>
+</div>
+
+<div id="line-filter">
+  <div class="switch-row">
+    <span id="line-filter-label">Lignes en circulation</span>
+    <label class="switch">
+      <input type="checkbox" id="filter-toggle" />
+      <span class="slider"></span>
+    </label>
+  </div>
+  <div class="switch-row">
+    <span>Arrêts utilisés uniquement</span>
+    <label class="switch">
+      <input type="checkbox" id="filter-stops-toggle" />
+      <span class="slider"></span>
+    </label>
+  </div>
+</div>
+
+<div id="map"></div>
+
+<!-- Modale questionnaire voyageur -->
+<div id="feedback-overlay" role="presentation">
+  <div id="feedback-modal" role="dialog" aria-modal="true" aria-labelledby="feedback-title">
+    <h2 id="feedback-title">🚌 Votre avis sur ce bus</h2>
+    <div class="modal-sub">Vos réponses restent anonymes et aident les autres voyageurs.</div>
+    <div id="feedback-questions"></div>
+    <div id="feedback-actions">
+      <button id="feedback-cancel" type="button">Annuler</button>
+      <button id="feedback-submit" type="button">Envoyer</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+  const REFRESH_MS = 5000; // synchronisé avec le rafraîchissement du serveur (5s)
+
+  const map = L.map('map', { zoomControl: true, preferCanvas: true }).setView([43.184, 3.0], 13);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19, attribution: '&copy; OpenStreetMap contributors'
+  }).addTo(map);
+
+  const vehicleLayer = L.layerGroup().addTo(map);
+  const stopLayer = L.layerGroup().addTo(map);
+  const lineLayer = L.layerGroup().addTo(map);
+
+  const statusEl = document.getElementById('status');
+  const searchInput = document.getElementById('search');
+  const searchResults = document.getElementById('search-results');
+  const filterToggle = document.getElementById('filter-toggle');
+  const filterLabel = document.getElementById('line-filter-label');
+
+  let allStops = [];
+  const stopById = new Map();
+  const stopMarkers = new Map();
+  const vehicleMarkers = {};
+
+  // shapeId -> {routeId, color, points: [[lat,lon], ...]}
+  const shapesById = new Map();
+  // routeId -> shapeId[] (pour savoir quelles lignes existent)
+  const shapeIdsByRoute = new Map();
+
+  let showOnlyActiveLines = false;
+  let showOnlyUsedStops = false;
+  let selectedVehicleId = null;
+
+  const selectionBanner = document.getElementById('selection-banner');
+  const filterStopsToggle = document.getElementById('filter-stops-toggle');
+
+  function getActiveRouteIds(vehicles) {
+    const set = new Set();
+    vehicles.forEach(v => { if (v.routeId) set.add(v.routeId); });
+    return set;
+  }
+
+  // --- Couleurs : on éclaircit/assombrit la couleur de la ligne pour donner
+  // un léger effet de relief (vitrage plus clair, ombre plus foncée) au bus ---
+  function shadeColor(hex, percent) {
+    hex = (hex || '#6d2c74').replace('#', '');
+    if (hex.length === 3) hex = hex.split('').map(c => c + c).join('');
+    const num = parseInt(hex, 16);
+    let r = (num >> 16) + percent, g = ((num >> 8) & 0x00FF) + percent, b = (num & 0x0000FF) + percent;
+    r = Math.max(0, Math.min(255, r)); g = Math.max(0, Math.min(255, g)); b = Math.max(0, Math.min(255, b));
+    return '#' + (0x1000000 + r * 0x10000 + g * 0x100 + b).toString(16).slice(1);
+  }
+  // Couleur de texte lisible (blanc ou noir) selon la luminosité de fond
+  function readableTextColor(hex) {
+    hex = (hex || '#6d2c74').replace('#', '');
+    if (hex.length === 3) hex = hex.split('').map(c => c + c).join('');
+    const num = parseInt(hex, 16);
+    const r = (num >> 16) & 0xFF, g = (num >> 8) & 0xFF, b = num & 0xFF;
+    const luma = 0.299 * r + 0.587 * g + 0.114 * b;
+    return luma > 170 ? '#1e1424' : '#ffffff';
+  }
+
+  // --- Icône de bus : forme dessinée (ombre, vitrage, dégradé) dans la
+  // couleur de la ligne desservie, avec le numéro de ligne affiché dessus.
+  // Le numéro reste toujours lisible (non tourné) même quand le bus pivote
+  // selon son cap GPS réel. ---
+  const gradCounter = { n: 0 };
+  function busIcon(bearing, color, label) {
+    const light = shadeColor(color, 45);
+    const dark = shadeColor(color, -55);
+    const gid = 'busGrad' + (gradCounter.n++);
+    const svg = `
+      <svg width="34" height="34" viewBox="0 0 34 34" style="overflow: visible">
+        <defs>
+          <linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="${light}"/>
+            <stop offset="100%" stop-color="${color}"/>
+          </linearGradient>
+        </defs>
+        <ellipse cx="17" cy="29" rx="9" ry="2.5" fill="rgba(0,0,0,0.28)"/>
+        <rect x="8" y="5" width="18" height="23" rx="4" fill="url(#${gid})" stroke="${dark}" stroke-width="1"/>
+        <rect x="10.5" y="7" width="13" height="6.5" rx="1.3" fill="#bfdbfe"/>
+        <rect x="10.5" y="15" width="13" height="4" rx="1" fill="#ffffff" opacity="0.28"/>
+        <circle cx="12" cy="27" r="2.1" fill="#111827"/>
+        <circle cx="22" cy="27" r="2.1" fill="#111827"/>
+        <polygon points="17,1.5 20,5.5 14,5.5" fill="#facc15"/>
+      </svg>`;
+    const html = `
+      <div class="bus-wrap">
+        <div class="bus-rot" style="transform: rotate(${bearing || 0}deg); transform-origin: center;">${svg}</div>
+        <div class="bus-label" style="top:1px;">${label || ''}</div>
+      </div>`;
+    return L.divIcon({ className: '', html, iconSize: [34, 34], iconAnchor: [17, 17] });
+  }
+  function speedKmh(speedMs) {
+    if (speedMs === null || speedMs === undefined) return "—";
+    return Math.round(speedMs * 3.6) + " km/h";
+  }
+  function formatEta(etaSec, nowSec) {
+    let diffMin = Math.round((etaSec - nowSec) / 60);
+    if (diffMin <= 0) return "Imminent";
+    if (diffMin === 1) return "1 min";
+    return diffMin + " min";
+  }
+
+  // Distance approx. en mètres entre deux points lat/lon (assez précis à l'échelle d'une ville)
+  function distMeters(a, b) {
+    const R = 6371000;
+    const dLat = (b[0] - a[0]) * Math.PI / 180;
+    const dLon = (b[1] - a[1]) * Math.PI / 180;
+    const lat1 = a[0] * Math.PI / 180, lat2 = b[0] * Math.PI / 180;
+    const h = Math.sin(dLat/2)**2 + Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLon/2)**2;
+    return 2 * R * Math.asin(Math.sqrt(h));
+  }
+
+  // Trouve l'indice du point du tracé le plus proche de la position du bus
+  function closestPointIndex(points, pos) {
+    let best = 0, bestDist = Infinity;
+    for (let i = 0; i < points.length; i++) {
+      const d = distMeters(points[i], pos);
+      if (d < bestDist) { bestDist = d; best = i; }
+    }
+    return best;
+  }
+
+  // Distance cumulée (en mètres) depuis le début du tracé, point par point
+  function buildCumDist(points) {
+    const cum = [0];
+    for (let i = 1; i < points.length; i++) {
+      cum.push(cum[i - 1] + distMeters(points[i - 1], points[i]));
+    }
+    return cum;
+  }
+
+  // Cap (direction en degrés) entre deux points
+  function bearingBetween(a, b) {
+    const lat1 = a[0] * Math.PI / 180, lat2 = b[0] * Math.PI / 180;
+    const dLon = (b[1] - a[1]) * Math.PI / 180;
+    const y = Math.sin(dLon) * Math.cos(lat2);
+    const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+    return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+  }
+
+  // Donne la position (et le cap) sur un tracé à une distance donnée depuis le départ
+  function pointAtDistance(points, cumDist, dist) {
+    const total = cumDist[cumDist.length - 1];
+    const d = Math.max(0, Math.min(dist, total));
+    let i = 0;
+    while (i < cumDist.length - 2 && cumDist[i + 1] < d) i++;
+    const segStart = cumDist[i], segEnd = cumDist[i + 1] ?? segStart;
+    const segLen = (segEnd - segStart) || 1;
+    const t = (d - segStart) / segLen;
+    const p1 = points[i], p2 = points[i + 1] || points[i];
+    const lat = p1[0] + (p2[0] - p1[0]) * t;
+    const lon = p1[1] + (p2[1] - p1[1]) * t;
+    return { latlng: [lat, lon], bearing: bearingBetween(p1, p2), distance: d };
+  }
+
+  // Déplacement approximatif en ligne droite (utilisé quand on ne connaît pas le tracé du bus)
+  function offsetLatLon(lat, lon, bearingDeg, distanceMeters) {
+    const R = 6371000;
+    const brng = bearingDeg * Math.PI / 180;
+    const lat1 = lat * Math.PI / 180, lon1 = lon * Math.PI / 180;
+    const lat2 = Math.asin(Math.sin(lat1) * Math.cos(distanceMeters / R) + Math.cos(lat1) * Math.sin(distanceMeters / R) * Math.cos(brng));
+    const lon2 = lon1 + Math.atan2(Math.sin(brng) * Math.sin(distanceMeters / R) * Math.cos(lat1), Math.cos(distanceMeters / R) - Math.sin(lat1) * Math.sin(lat2));
+    return [lat2 * 180 / Math.PI, lon2 * 180 / Math.PI];
+  }
+
+  // --- Chargement des tracés (une fois au démarrage) ---
+  async function loadShapes() {
+    const res = await fetch('/api/shapes');
+    const data = await res.json();
+    data.routes.forEach(route => {
+      shapeIdsByRoute.set(route.routeId, []);
+      route.shapes.forEach(shape => {
+        shapesById.set(shape.shapeId, {
+          routeId: route.routeId, color: route.color, points: shape.points,
+          cumDist: buildCumDist(shape.points)
+        });
+        shapeIdsByRoute.get(route.routeId).push(shape.shapeId);
+      });
+    });
+    drawLines([]); // premier affichage, sans bus encore connus
+  }
+
+  // Redessine les tracés. En mode normal : toutes les lignes (ou seulement celles en
+  // circulation), avec le segment déjà parcouru en transparent pour chaque bus actif.
+  // Si un bus est sélectionné : uniquement SA ligne, trajet futur en couleur pleine,
+  // trajet déjà effectué en transparent, toutes les autres lignes masquées.
+  function drawLines(vehicles) {
+    lineLayer.clearLayers();
+
+    if (selectedVehicleId) {
+      const v = vehicles.find(v => v.id === selectedVehicleId);
+      if (v && v.shapeId && shapesById.has(v.shapeId)) {
+        const shape = shapesById.get(v.shapeId);
+        const idx = closestPointIndex(shape.points, [v.latitude, v.longitude]);
+        const traveled = shape.points.slice(0, idx + 1);
+        const remaining = shape.points.slice(idx);
+        if (traveled.length > 1) {
+          L.polyline(traveled, { color: shape.color, weight: 3, opacity: 0.15 }).addTo(lineLayer);
+        }
+        if (remaining.length > 1) {
+          L.polyline(remaining, { color: shape.color, weight: 5, opacity: 0.95 }).addTo(lineLayer);
+        }
+      }
+      return; // rien d'autre ne s'affiche tant qu'un bus est sélectionné
+    }
+
+    // shapeId -> position du bus le plus avancé sur ce tracé
+    const progressByShape = new Map();
+    const activeRouteIds = getActiveRouteIds(vehicles);
+    vehicles.forEach(v => {
+      if (v.shapeId && shapesById.has(v.shapeId)) {
+        progressByShape.set(v.shapeId, [v.latitude, v.longitude]);
+      }
+    });
+
+    shapesById.forEach((shape, shapeId) => {
+      if (showOnlyActiveLines && !activeRouteIds.has(shape.routeId)) return;
+
+      const busPos = progressByShape.get(shapeId);
+      if (!busPos) {
+        // Pas de bus actuellement sur ce tracé précis : ligne pleine normale
+        L.polyline(shape.points, { color: shape.color, weight: 3, opacity: 0.7 }).addTo(lineLayer);
+        return;
+      }
+
+      const idx = closestPointIndex(shape.points, busPos);
+      const traveled = shape.points.slice(0, idx + 1);
+      const remaining = shape.points.slice(idx);
+
+      if (traveled.length > 1) {
+        L.polyline(traveled, { color: shape.color, weight: 3, opacity: 0.15 }).addTo(lineLayer);
+      }
+      if (remaining.length > 1) {
+        L.polyline(remaining, { color: shape.color, weight: 4, opacity: 0.9 }).addTo(lineLayer);
+      }
+    });
+  }
+
+  // --- Contenu du popup d'un bus : infos de base tout de suite, puis
+  // horaires temps réel + moyenne des avis chargés en asynchrone ---
+  function busPopupBaseHtml(v) {
+    const textColor = readableTextColor(v.routeColor);
+    return `<div class="bus-popup" data-vehicle="${v.id}">
+      <span class="route-badge" style="background:${v.routeColor}; color:${textColor}">Ligne ${v.routeShortName}</span>
+      ${v.headsign ? `<div class="headsign">→ ${v.headsign}</div>` : ''}
+      <div class="meta-row"><span>🚍 ${v.label || v.id}</span><span>${speedKmh(v.speed)}</span></div>
+      <div class="section-title">Horaires en temps réel</div>
+      <div class="schedule-slot"><i>Chargement…</i></div>
+      <div class="feedback-avg"></div>
+      <button class="feedback-btn" onclick="openFeedbackModal('${v.id}')">📋 Donner mon avis sur ce bus</button>
+    </div>`;
+  }
+
+  async function loadVehicleSchedule(vehicleId, marker) {
+    try {
+      const res = await fetch(`/api/vehicles/${encodeURIComponent(vehicleId)}/next`);
+      const data = await res.json();
+      const now = new Date();
+      const nowSec = now.getHours()*3600 + now.getMinutes()*60 + now.getSeconds();
+
+      let html;
+      if (!data.results || data.results.length === 0) {
+        html = `<i>Aucun horaire à venir pour ce voyage.</i>`;
+      } else {
+        html = data.results.map(r => `
+          <div class="passage-row">
+            <span>${r.stopName}</span>
+            <span class="passage-time ${r.realtime ? 'live' : ''}">${formatEta(r.etaSec, nowSec)}</span>
+          </div>`).join('');
+      }
+      updatePopupSlot(marker, '.schedule-slot', html);
+    } catch (err) {
+      updatePopupSlot(marker, '.schedule-slot', `⚠️ Horaires indisponibles`);
+    }
+  }
+
+  async function loadVehicleFeedbackAvg(vehicleId, marker) {
+    try {
+      const res = await fetch(`/api/vehicles/${encodeURIComponent(vehicleId)}/feedback`);
+      const data = await res.json();
+      updatePopupSlot(marker, '.feedback-avg', feedbackAvgHtml(data));
+    } catch (err) {
+      // silencieux : la moyenne n'est qu'une info secondaire
+    }
+  }
+
+  const FEEDBACK_LABELS = {
+    full: "Bus plein",
+    heating: "Chauffage OK",
+    ac: "Climatisation OK",
+    driver: "Conducteur sympathique",
+    driving: "Conduite agréable",
+  };
+
+  function feedbackAvgHtml(data) {
+    if (!data || data.totalVotes === 0) {
+      return `<div class="feedback-empty">Pas encore d'avis pour ce bus — soyez le premier !</div>`;
+    }
+    let html = `<div class="section-title">Avis des voyageurs</div>`;
+    Object.keys(FEEDBACK_LABELS).forEach(key => {
+      const s = data.summary[key];
+      if (!s || s.total === 0) return;
+      html += `<div class="feedback-avg-row">
+        <span>${FEEDBACK_LABELS[key]}</span>
+        <span class="bar"><span class="bar-fill" style="width:${s.pct}%"></span></span>
+        <span class="pct">${s.pct}%</span>
+      </div>`;
+    });
+    return html;
+  }
+
+  // Met à jour un sous-élément du popup ouvert, sans tout redessiner (évite
+  // que le popup se referme ou saute pendant le chargement)
+  function updatePopupSlot(marker, selector, innerHtml) {
+    const popup = marker.getPopup();
+    if (!popup) return;
+    const el = popup.getElement ? popup.getElement() : null;
+    const target = el ? el.querySelector(selector) : null;
+    if (target) {
+      target.innerHTML = innerHtml;
+    } else {
+      // popup pas encore montée dans le DOM : on la reprogramme une fois ouverte
+      marker.once('popupopen', () => updatePopupSlot(marker, selector, innerHtml));
+    }
+  }
+
+  function refreshBusPopup(v, marker) {
+    marker.getPopup().setContent(busPopupBaseHtml(v));
+    loadVehicleSchedule(v.id, marker);
+    loadVehicleFeedbackAvg(v.id, marker);
+  }
+
+  // --- Positions des bus (vraies positions toutes les 5s, animation fluide entre les deux) ---
+  let latestVehicles = [];
+  const vehicleState = new Map(); // id -> {shapeId, lastRealDistance, lastRealTimestampMs, speed, lastLatLng, bearingDeg}
+
+  const MAX_EXTRAPOLATION_SEC = 40; // au-delà, on considère le bus arrêté / le flux périmé
+
+  async function refreshVehicles() {
+    try {
+      const res = await fetch('/api/vehicles');
+      const data = await res.json();
+      latestVehicles = data.vehicles;
+      const seen = new Set();
+
+      data.vehicles.forEach(v => {
+        seen.add(v.id);
+        const realTimestampMs = v.timestamp ? v.timestamp * 1000 : Date.now();
+
+        const prevState = vehicleState.get(v.id);
+        const isNewFix = !prevState || prevState.lastRealTimestampMs !== realTimestampMs;
+
+        if (isNewFix) {
+          const shape = v.shapeId ? shapesById.get(v.shapeId) : null;
+          let lastRealDistance = null;
+          if (shape) {
+            const idx = closestPointIndex(shape.points, [v.latitude, v.longitude]);
+            lastRealDistance = shape.cumDist[idx];
+          }
+          vehicleState.set(v.id, {
+            shapeId: v.shapeId,
+            lastRealDistance,
+            lastRealTimestampMs: realTimestampMs,
+            speed: v.speed || 0,
+            lastLatLng: [v.latitude, v.longitude],
+            bearingDeg: v.bearing || prevState?.bearingDeg || 0,
+          });
+        }
+
+        if (vehicleMarkers[v.id]) {
+          // On recale immédiatement sur la vraie position dès qu'elle arrive
+          if (isNewFix) vehicleMarkers[v.id].setLatLng([v.latitude, v.longitude]);
+          vehicleMarkers[v.id].setIcon(busIcon(v.bearing, v.routeColor, v.routeShortName));
+          if (selectedVehicleId === v.id) refreshBusPopup(v, vehicleMarkers[v.id]);
+        } else {
+          vehicleMarkers[v.id] = L.marker([v.latitude, v.longitude], { icon: busIcon(v.bearing, v.routeColor, v.routeShortName) })
+            .addTo(vehicleLayer).bindPopup(busPopupBaseHtml(v));
+          vehicleMarkers[v.id].on('click', () => selectVehicle(v.id));
+          // Garde l'icône "œil" synchronisée si l'utilisateur ferme la fenêtre
+          // avec la croix native de Leaflet (ou la rouvre) plutôt qu'avec le bouton dédié.
+          vehicleMarkers[v.id].on('popupclose', () => {
+            if (selectedVehicleId === v.id) { popupHidden = true; updateEyeButton(); }
+          });
+          vehicleMarkers[v.id].on('popupopen', () => {
+            if (selectedVehicleId === v.id) { popupHidden = false; updateEyeButton(); }
+          });
+        }
+      });
+      Object.keys(vehicleMarkers).forEach(id => {
+        if (!seen.has(id)) {
+          vehicleLayer.removeLayer(vehicleMarkers[id]);
+          delete vehicleMarkers[id];
+          vehicleState.delete(id);
+          if (selectedVehicleId === id) selectVehicle(id); // désélectionne s'il a disparu
+        }
+      });
+
+      const activeRouteIds = getActiveRouteIds(latestVehicles);
+      if (shapesById.size > 0) drawLines(latestVehicles);
+      updateStopVisibility(activeRouteIds);
+
+      const now = new Date(data.updatedAt).toLocaleTimeString('fr-FR');
+      statusEl.innerHTML = `<span class="dot"></span>${data.vehicles.length} bus actifs — ${now}`;
+    } catch (err) {
+      statusEl.innerHTML = `⚠️ Connexion au serveur impossible`;
+    }
+  }
+
+  // Sélectionne / désélectionne un bus. Quand un bus est sélectionné, seule sa
+  // ligne reste affichée (voir drawLines), et son popup affiche ses horaires
+  // temps réel + la moyenne des avis voyageurs. Le bouton "œil" du bandeau
+  // permet de masquer cette fenêtre à tout moment pour dégager la vue sur la
+  // carte, sans perdre la sélection du bus (la ligne reste surlignée).
+  let popupHidden = false;
+
+  function selectVehicle(id) {
+    const isNewSelection = selectedVehicleId !== id;
+    selectedVehicleId = (selectedVehicleId === id) ? null : id;
+    if (selectedVehicleId) {
+      if (isNewSelection) popupHidden = false; // nouvelle sélection : on montre la fenêtre par défaut
+      const v = latestVehicles.find(v => v.id === selectedVehicleId);
+      selectionBanner.innerHTML = `
+        <span class="banner-text" tabindex="0" role="button"
+              aria-label="Bus ${v?.label || id}, ligne ${v?.routeShortName || ''} sélectionné. Cliquer pour voir toutes les lignes.">
+          🚍 Bus ${v?.label || id} · Ligne ${v?.routeShortName || ''} · <u>voir toutes les lignes ✕</u>
+        </span>
+        <button id="eye-btn" type="button" aria-pressed="false"></button>`;
+      selectionBanner.style.display = 'flex';
+
+      const deselect = () => selectVehicle(selectedVehicleId);
+      const bannerText = selectionBanner.querySelector('.banner-text');
+      bannerText.addEventListener('click', deselect);
+      bannerText.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); deselect(); } });
+      document.getElementById('eye-btn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleBusPopup();
+      });
+      updateEyeButton();
+
+      if (v) {
+        const marker = vehicleMarkers[id];
+        if (marker) {
+          if (!popupHidden) marker.openPopup();
+          refreshBusPopup(v, marker);
+        }
+      }
+    } else {
+      selectionBanner.style.display = 'none';
+    }
+    drawLines(latestVehicles);
+  }
+
+  // Bouton "œil" : masque/affiche la fenêtre du bus sélectionné sans le désélectionner.
+  function toggleBusPopup() {
+    if (!selectedVehicleId) return;
+    const marker = vehicleMarkers[selectedVehicleId];
+    if (!marker) return;
+    popupHidden = !popupHidden;
+    if (popupHidden) marker.closePopup(); else marker.openPopup();
+    updateEyeButton();
+  }
+  function updateEyeButton() {
+    const btn = document.getElementById('eye-btn');
+    if (!btn) return;
+    btn.textContent = popupHidden ? '🙈' : '👁️';
+    const label = popupHidden ? 'Afficher la fenêtre de ce bus' : 'Masquer la fenêtre pour voir la carte';
+    btn.title = label;
+    btn.setAttribute('aria-label', label);
+    btn.setAttribute('aria-pressed', String(popupHidden));
+  }
+
+  // Anime les bus entre deux positions GPS réelles, en avançant approximativement
+  // à leur dernière vitesse connue, le long du tracé de leur ligne quand il est connu.
+  function animateVehicles() {
+    const nowMs = Date.now();
+    vehicleState.forEach((state, id) => {
+      const marker = vehicleMarkers[id];
+      if (!marker) return;
+
+      const elapsedSec = (nowMs - state.lastRealTimestampMs) / 1000;
+      if (elapsedSec <= 0 || state.speed <= 0) return;
+      if (elapsedSec > MAX_EXTRAPOLATION_SEC) return; // flux trop ancien : on ne bouge plus
+
+      const shape = state.shapeId ? shapesById.get(state.shapeId) : null;
+
+      if (shape && state.lastRealDistance !== null) {
+        // Avance approximative le long du tracé de la ligne (suit les routes)
+        const estimatedDistance = state.lastRealDistance + state.speed * elapsedSec;
+        const { latlng, bearing } = pointAtDistance(shape.points, shape.cumDist, estimatedDistance);
+        marker.setLatLng(latlng);
+        const v = latestVehicles.find(v => v.id === id);
+        marker.setIcon(busIcon(bearing, v?.routeColor, v?.routeShortName));
+      } else {
+        // Pas de tracé connu : avance approximative en ligne droite
+        const distance = state.speed * elapsedSec;
+        const latlng = offsetLatLon(state.lastLatLng[0], state.lastLatLng[1], state.bearingDeg, distance);
+        marker.setLatLng(latlng);
+      }
+    });
+  }
+
+  // --- Prochains passages à un arrêt (au clic) ---
+  async function showStopPopup(stop, marker) {
+    marker.bindPopup(`<div class="stop-popup"><h3>${stop.name}</h3>Chargement des horaires…</div>`).openPopup();
+    try {
+      const res = await fetch(`/api/stops/${encodeURIComponent(stop.id)}/next`);
+      const data = await res.json();
+      const now = new Date();
+      const nowSec = now.getHours()*3600 + now.getMinutes()*60 + now.getSeconds();
+
+      let html = `<div class="stop-popup"><h3>${stop.name}</h3>`;
+      if (data.results.length === 0) {
+        html += `<i>Aucun passage prévu dans l'heure qui vient.</i>`;
+      } else {
+        data.results.forEach(r => {
+          html += `<div class="passage-row">
+            <span class="line-badge" style="background:${r.routeColor}">${r.routeShortName}</span>
+            <span>${r.headsign || ''}</span>
+            <span class="passage-time ${r.realtime ? 'live' : ''}">${formatEta(r.etaSec, nowSec)}</span>
+          </div>`;
+        });
+      }
+      html += `</div>`;
+      marker.setPopupContent(html);
+    } catch (err) {
+      marker.setPopupContent(`<div class="stop-popup"><h3>${stop.name}</h3>⚠️ Horaires indisponibles</div>`);
+    }
+  }
+
+  // --- Arrêts (chargés une fois) ---
+  async function loadStops() {
+    const res = await fetch('/api/stops');
+    const data = await res.json();
+    allStops = data.stops;
+    allStops.forEach(stop => {
+      stopById.set(stop.id, stop);
+      const marker = L.circleMarker([stop.lat, stop.lon], {
+        radius: 5, weight: 2, color: '#6d2c74', fillColor: '#ffffff', fillOpacity: 1
+      }).addTo(stopLayer);
+      marker.on('click', () => showStopPopup(stop, marker));
+      stopMarkers.set(stop.id, marker);
+    });
+  }
+
+  // Affiche/masque chaque arrêt selon le filtre "arrêts utilisés uniquement"
+  function updateStopVisibility(activeRouteIds) {
+    stopMarkers.forEach((marker, stopId) => {
+      const stop = stopById.get(stopId);
+      const used = !showOnlyUsedStops || (stop.routeIds || []).some(r => activeRouteIds.has(r));
+      const isShown = stopLayer.hasLayer(marker);
+      if (used && !isShown) stopLayer.addLayer(marker);
+      if (!used && isShown) stopLayer.removeLayer(marker);
+    });
+  }
+
+  // --- Recherche d'arrêt ---
+  searchInput.addEventListener('input', () => {
+    const q = searchInput.value.trim().toLowerCase();
+    if (q.length < 2) { searchResults.style.display = 'none'; return; }
+    const matches = allStops.filter(s => s.name.toLowerCase().includes(q)).slice(0, 8);
+    if (matches.length === 0) { searchResults.style.display = 'none'; return; }
+    searchResults.innerHTML = matches.map(s => `<div data-id="${s.id}">${s.name}</div>`).join('');
+    searchResults.style.display = 'block';
+    searchResults.querySelectorAll('div').forEach(el => {
+      el.addEventListener('click', () => {
+        const stop = allStops.find(s => s.id === el.dataset.id);
+        map.setView([stop.lat, stop.lon], 17);
+        const marker = stopMarkers.get(stop.id);
+        if (marker) showStopPopup(stop, marker);
+        searchResults.style.display = 'none';
+        searchInput.value = '';
+      });
+    });
+  });
+
+  // --- Interrupteurs de calques ---
+  document.getElementById('toggle-vehicles').addEventListener('change', e => {
+    e.target.checked ? map.addLayer(vehicleLayer) : map.removeLayer(vehicleLayer);
+  });
+  document.getElementById('toggle-stops').addEventListener('change', e => {
+    e.target.checked ? map.addLayer(stopLayer) : map.removeLayer(stopLayer);
+  });
+  document.getElementById('toggle-lines').addEventListener('change', e => {
+    e.target.checked ? map.addLayer(lineLayer) : map.removeLayer(lineLayer);
+  });
+
+  // --- Interrupteur "Toutes les lignes" / "Lignes en circulation" ---
+  filterToggle.addEventListener('change', e => {
+    showOnlyActiveLines = e.target.checked;
+    filterLabel.textContent = showOnlyActiveLines ? "Lignes en circulation" : "Toutes les lignes";
+    drawLines(latestVehicles);
+  });
+
+  // --- Interrupteur "Arrêts utilisés uniquement" ---
+  filterStopsToggle.addEventListener('change', e => {
+    showOnlyUsedStops = e.target.checked;
+    updateStopVisibility(getActiveRouteIds(latestVehicles));
+  });
+
+  // ---------------------------------------------------------------------
+  // Géolocalisation de l'utilisateur
+  // ---------------------------------------------------------------------
+  const locateBtn = document.getElementById('locate-btn');
+  let userMarker = null, userPulse = null;
+
+  locateBtn.addEventListener('click', () => {
+    if (!navigator.geolocation) {
+      alert("La géolocalisation n'est pas disponible sur ce navigateur.");
+      return;
+    }
+    locateBtn.classList.add('loading');
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        locateBtn.classList.remove('loading');
+        locateBtn.classList.add('active');
+        const latlng = [pos.coords.latitude, pos.coords.longitude];
+        if (!userMarker) {
+          userPulse = L.marker(latlng, {
+            icon: L.divIcon({ className: '', html: '<div class="user-dot-pulse"></div>', iconSize: [16, 16], iconAnchor: [8, 8] }),
+            interactive: false,
+          }).addTo(map);
+          userMarker = L.marker(latlng, {
+            icon: L.divIcon({ className: '', html: '<div class="user-dot"></div>', iconSize: [16, 16], iconAnchor: [8, 8] }),
+          }).addTo(map).bindPopup("📍 Vous êtes ici");
+        } else {
+          userMarker.setLatLng(latlng);
+          userPulse.setLatLng(latlng);
+        }
+        map.setView(latlng, 16);
+      },
+      (err) => {
+        locateBtn.classList.remove('loading');
+        alert("Impossible de récupérer votre position : " + err.message);
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  });
+
+  // ---------------------------------------------------------------------
+  // Questionnaire voyageur (avis en direct sur le bus sélectionné)
+  // ---------------------------------------------------------------------
+  const FEEDBACK_QUESTIONS = [
+    { key: 'full', label: 'Le bus est-il plein ?' },
+    { key: 'heating', label: 'Le chauffage fonctionne-t-il bien ?' },
+    { key: 'ac', label: 'La climatisation fonctionne-t-elle bien ?' },
+    { key: 'driver', label: 'Le conducteur est-il sympathique ?' },
+    { key: 'driving', label: 'La conduite est-elle agréable ?' },
+  ];
+
+  const feedbackOverlay = document.getElementById('feedback-overlay');
+  const feedbackQuestionsEl = document.getElementById('feedback-questions');
+  const feedbackSubmitBtn = document.getElementById('feedback-submit');
+  const feedbackCancelBtn = document.getElementById('feedback-cancel');
+  let feedbackAnswers = {};
+  let feedbackVehicleId = null;
+
+  function openFeedbackModal(vehicleId) {
+    feedbackVehicleId = vehicleId;
+    feedbackAnswers = {};
+    feedbackQuestionsEl.innerHTML = FEEDBACK_QUESTIONS.map(q => `
+      <div class="question-block" data-key="${q.key}">
+        <label class="qlabel" id="qlabel-${q.key}">${q.label}</label>
+        <div class="toggle-group" role="group" aria-labelledby="qlabel-${q.key}">
+          <button type="button" data-val="yes" aria-pressed="false">Oui</button>
+          <button type="button" data-val="no" aria-pressed="false">Non</button>
+        </div>
+      </div>`).join('');
+
+    feedbackQuestionsEl.querySelectorAll('.question-block').forEach(block => {
+      const key = block.dataset.key;
+      block.querySelectorAll('button').forEach(btn => {
+        btn.addEventListener('click', () => {
+          feedbackAnswers[key] = (btn.dataset.val === 'yes');
+          block.querySelectorAll('button').forEach(b => {
+            b.classList.remove('selected-yes', 'selected-no');
+            b.setAttribute('aria-pressed', 'false');
+          });
+          btn.classList.add(btn.dataset.val === 'yes' ? 'selected-yes' : 'selected-no');
+          btn.setAttribute('aria-pressed', 'true');
+        });
+      });
+    });
+
+    feedbackOverlay.style.display = 'flex';
+    feedbackCancelBtn.focus();
+  }
+
+  feedbackCancelBtn.addEventListener('click', () => { feedbackOverlay.style.display = 'none'; });
+  feedbackOverlay.addEventListener('click', (e) => { if (e.target === feedbackOverlay) feedbackOverlay.style.display = 'none'; });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && feedbackOverlay.style.display === 'flex') {
+      feedbackOverlay.style.display = 'none';
+    }
+  });
+
+  feedbackSubmitBtn.addEventListener('click', async () => {
+    if (Object.keys(feedbackAnswers).length === 0) {
+      alert("Répondez à au moins une question avant d'envoyer.");
+      return;
+    }
+    feedbackSubmitBtn.disabled = true;
+    feedbackSubmitBtn.textContent = "Envoi…";
+    try {
+      await fetch(`/api/vehicles/${encodeURIComponent(feedbackVehicleId)}/feedback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(feedbackAnswers),
+      });
+      feedbackOverlay.style.display = 'none';
+      // Rafraîchit la moyenne affichée dans le popup du bus concerné
+      const marker = vehicleMarkers[feedbackVehicleId];
+      if (marker) loadVehicleFeedbackAvg(feedbackVehicleId, marker);
+    } catch (err) {
+      alert("Impossible d'envoyer votre avis pour le moment.");
+    } finally {
+      feedbackSubmitBtn.disabled = false;
+      feedbackSubmitBtn.textContent = "Envoyer";
+    }
+  });
+
+  // --- Démarrage ---
+  loadShapes();
+  loadStops();
+  refreshVehicles();
+  setInterval(refreshVehicles, REFRESH_MS); // vraies positions (serveur)
+  setInterval(animateVehicles, 400);        // mouvement fluide entre deux positions réelles
+</script>
+
+</body>
+</html>

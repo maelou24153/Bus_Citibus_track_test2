@@ -1,0 +1,19 @@
+{
+  "name": "citibus-narbonne-tracker",
+  "version": "2.0.0",
+  "description": "Suivi en temps réel des bus Citibus (Grand Narbonne) : positions, arrêts, tracés de lignes et horaires, via GTFS et GTFS-RT.",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "gtfs-realtime-bindings": "^1.1.1",
+    "adm-zip": "^0.5.14",
+    "csv-parse": "^5.5.6"
+  }
+}
